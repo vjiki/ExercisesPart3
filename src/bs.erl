@@ -18,7 +18,6 @@
 
 %% custom state names
 -export([available/2,
-        available/3,
         get_ack/2,
         full/3,
         full/2,
@@ -59,8 +58,9 @@ stop(BSPid) ->
 
 %%bs:connect(BSPid, MSPid, MSName)
 %%Connect to a specific base station. [Called by a phone]
+%%gen_fsm:sync_send_event(BSPid, {connect, MSPid, MSName}, 50000).
 connect(BSPid, MSPid, MSName) ->
-    gen_fsm:sync_send_event(BSPid, {connect, MSPid, MSName}, 50000).
+    gen_fsm:send_event(BSPid, {connect, MSPid, MSName}).
 
 %%bs:ack(BSPid,MSName)
 %%Acknowledge a connection to a specific base station. [Called by a phone].
@@ -105,31 +105,15 @@ poll(MSName, PollDB) ->
     end.
 
 
-available(timeout, State=#bs_state{}) ->
-    %%io:format("available timeout ~w ~n",[?rec_info(bs_state,State)]),
-    case whereis(lr) of
-        undefined -> io:format("~p: lr is not started ~n", [State#bs_state.name]),
-                    {next_state, available, State,5000};
-        _Pid -> case lr:who_are_at(State#bs_state.name) of
-                    none -> %%io:format("~p: who are at: none ~n", [State#bs_state.name]),
-                        {next_state, available, State,5000};
-                    {ok,PhoneList} -> io:format("~p: who are at ~p ~n", [State#bs_state.name,PhoneList]),
-                        %%lists:map(fun(X)-> poll(X,State#bs_state.poll_db) end, PhoneList),
-                        case length(PhoneList) < ?MAX_CAPACITY  of
-                            true -> [poll(Elem,State#bs_state.poll_db) || Elem <- PhoneList],
-                                io:format("poll_db: ~p ~n", [State#bs_state.poll_db]),
-                                {next_state, available, State#bs_state{current_capacity = length(PhoneList)},5000};
-                            false -> io:format("going to full state: ~p ~n", [State#bs_state.poll_db]),
-                                {next_state, full, State#bs_state{current_capacity = length(PhoneList)},5000}
-                        end
-                end
-    end.
 
-available({connect, MSPid, MSName}, From, State=#bs_state{}) ->
+
+available({connect, MSPid, MSName}, State=#bs_state{}) ->
     io:format("~p connect ~n", [MSName]),
     case State#bs_state.current_capacity < ?MAX_CAPACITY of
-        true -> {reply, ok, get_ack, State#bs_state{mspid = MSPid, msname = MSName, from=From}, 5000};
-        false -> {reply, reject, available, State, 5000}
+        true -> phone:respond(connect,MSName),
+            {next_state, get_ack, State#bs_state{mspid = MSPid, msname = MSName}, 5000};
+        false -> phone:respond(reject,MSName),
+            {next_state, available, State, 5000}
     end;
     %%Ref = monitor(process, MSPid),
 %%    case phone:respond(connect,MSPid) of
@@ -143,10 +127,32 @@ available({connect, MSPid, MSName}, From, State=#bs_state{}) ->
 %%            %% TODO
 %%            {reply, {error, Reason}, available, State}
 %%    end;
-available(timeout, From, State=#bs_state{}) ->
-    io:format("~p timeout ~n", [State]),
-    {next_state, available, State#bs_state{mspid = nopid, msname = noname, from=From},5000};
-available(Event, _From, State=#bs_state{}) ->
+%%available(timeout, State=#bs_state{}) ->
+%%    io:format("~p timeout ~n", [State]),
+%%    {next_state, available, State#bs_state{mspid = nopid, msname = noname},5000};
+available(timeout, State=#bs_state{}) ->
+    %%io:format("available timeout ~w ~n",[?rec_info(bs_state,State)]),
+    case whereis(lr) of
+        undefined -> io:format("~p: lr is not started ~n", [State#bs_state.name]),
+            {next_state, available, State,5000};
+        _Pid -> case lr:who_are_at(State#bs_state.name) of
+                    none -> %%io:format("~p: who are at: none ~n", [State#bs_state.name]),
+                        {next_state, available, State,5000};
+                    {ok,PhoneList} -> io:format("~p: who are at ~p ~n", [State#bs_state.name,PhoneList]),
+                        %%lists:map(fun(X)-> poll(X,State#bs_state.poll_db) end, PhoneList),
+                        case length(PhoneList) < ?MAX_CAPACITY  of
+                            true -> [poll(Elem,State#bs_state.poll_db) || Elem <- PhoneList],
+                                io:format("poll_db: ~p ~n", [State#bs_state.poll_db]),
+                                {next_state, available, State#bs_state{current_capacity = length(PhoneList)},5000};
+                            false -> io:format("going to full state: ~p ~n", [State#bs_state.poll_db]),
+                                {next_state, full, State#bs_state{current_capacity = length(PhoneList)},5000}
+                        end
+                end
+    end;
+available(info, State=#bs_state{}) ->
+    io:format("Info: ~w ~n", [?rec_info(bs_state,State)]),
+    {reply, ok, info, State, 5000};
+available(Event, State=#bs_state{}) ->
     unexpected(Event, available),
     {next_state, available, State, 5000}.
 
@@ -161,6 +167,9 @@ get_ack({acknowledgement, MSName}, State = #bs_state{}) ->
     lr:located_at(MSName, State#bs_state.name),
     %%phone:respond(connect,MSName),
     {next_state, available, State, 5000};
+get_ack(info, State=#bs_state{}) ->
+    io:format("Info: ~w ~n", [?rec_info(bs_state,State)]),
+    {reply, ok, get_ack, State, 5000};
 get_ack(Event, State) ->
     io:format("~p unkonown state ~n", [Event]),
     unexpected(Event, acknowledgement),
@@ -192,8 +201,9 @@ full(info, _From, State=#bs_state{}) ->
     io:format("Info: ~w ~n", [?rec_info(bs_state,State)]),
     {reply, ok, full, State, 5000};
 full({connect, MSPid, MSName}, _From, State=#bs_state{}) ->
-            notice(State, "full, rejecting phone MS ~p ~p", [MSPid, MSName]),
-    {reply, reject, full, State, 5000};
+    notice(State, "full, rejecting phone MS ~p ~p", [MSPid, MSName]),
+    phone:respond(reject,MSName),
+    {next_state, full, State, 5000};
 full(timeout, From, State=#bs_state{}) ->
     {next_state, get_ack, State#bs_state{mspid = nopid, msname = noname, from=From}, 5000};
 full(Event, _From, State=#bs_state{}) ->
@@ -223,7 +233,8 @@ handle_sync_event(_Event, _From, StateName, State = #bs_state{}) ->
 handle_info(_Info, StateName, State = #bs_state{}) ->
     {next_state, StateName, State}.
 
-terminate(_Reason, _StateName, _State = #bs_state{}) ->
+terminate(Reason, _StateName, _State = #bs_state{}) ->
+    io:format("Terminated with Reason: ~p~n", [Reason]),
     ok.
 
 code_change(_OldVsn, StateName, State = #bs_state{}, _Extra) ->

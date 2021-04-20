@@ -60,14 +60,13 @@ handle_call({respond,connect}, From, State=#phone_state{}) ->
     %% what server shall reply??? might be ok? or?
     io:format("check that bs_name and From are equal ~p ~p ~n", [State#phone_state.bs_name,From]),
     io:format("bs ack finished ~n"),
-    Reply = ok,
-    {reply, Reply, State};
+    bs:ack(State#phone_state.bs_name,State#phone_state.ms_name),
+    io:format("~p: Ack ~n", [State#phone_state.bs_name]),
+    {reply, ok, State#phone_state{status = connected}};
 handle_call({respond,reject}, _From, State=#phone_state{}) ->
-    Reply = reject,
-    {reply, Reply, State};
+    {reply, reject, State#phone_state{status = disconnected}};
 handle_call({respond,busy}, _From, State=#phone_state{}) ->
-    Reply = busy,
-    {reply, Reply, State};
+    {reply, busy, State#phone_state{status = disconnected}};
 
 handle_call({location,BSName}, _From, State=#phone_state{}) ->
     Reply = ok,
@@ -77,22 +76,14 @@ handle_call(connect, _From, State = #phone_state{}) ->
     case State#phone_state.bs_name of
         undefined -> {reply, {error, undefined_bs_name}, State};
         BSName -> case erlang:whereis(BSName) of
-                     undefined ->
-                         io:format("~p: BS is not started ~n", [BSName]),
-                         {reply, {error, bs_is_not_started, BSName}, State};
-                     _Pid ->
-                         io:format("~p: Connecting ~n", [BSName]),
-                         case  bs:connect(BSName, State#phone_state.ms_pid, State#phone_state.ms_name) of
-                             ok -> case bs:ack(State#phone_state.bs_name,State#phone_state.ms_name) of
-                                       ok -> io:format("~p: Ack ~n", [BSName]),
-                                           {reply, ok, State#phone_state{status = connected}};
-                                       reject -> {reply, reject, State#phone_state{status = disconnected}};
-                                       busy -> {reply, busy, State#phone_state{status = disconnected}}
-                                   end;
-                             reject -> {reply, reject, State#phone_state{status = disconnected}};
-                             busy -> {reply, busy, State#phone_state{status = disconnected}}
-                         end
-                 end
+                      undefined ->
+                          io:format("~p: BS is not started ~n", [BSName]),
+                          {reply, {error, bs_is_not_started, BSName}, State};
+                      _Pid ->
+                          io:format("~p: Connecting ~n", [BSName]),
+                          bs:connect(BSName, State#phone_state.ms_pid, State#phone_state.ms_name),
+                          {reply, ok, State}
+                  end
     end;
 
 handle_call(info, _From, State=#phone_state{}) ->
