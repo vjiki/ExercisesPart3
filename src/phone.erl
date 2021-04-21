@@ -33,7 +33,7 @@
 %%% API
 %%%===================================================================
 start_link(MSName) ->
-    io:format("~p starting ~n", [MSName]),
+    %%io:format("~p starting ~n", [MSName]),
     gen_server:start_link({local, MSName}, ?MODULE, MSName, []).
 
 respond(Request, MSPid) -> gen_server:call(MSPid, {respond, Request}).
@@ -56,16 +56,15 @@ init(MSName) -> {ok,#phone_state{ms_pid=self(),ms_name=MSName}}.
 %%% handle_call
 %%%===================================================================
 
-handle_call({respond,connect}, From, State=#phone_state{}) ->
-    %% what server shall reply??? might be ok? or?
-    io:format("check that bs_name and From are equal ~p ~p ~n", [State#phone_state.bs_name,From]),
-    io:format("bs ack finished ~n"),
+handle_call({respond,connect}, _From, State=#phone_state{}) ->
     bs:ack(State#phone_state.bs_name,State#phone_state.ms_name),
-    io:format("~p: Ack ~n", [State#phone_state.bs_name]),
+    %%io:format("~p: Ack ~n", [State#phone_state.bs_name]),
     {reply, ok, State#phone_state{status = connected}};
 handle_call({respond,reject}, _From, State=#phone_state{}) ->
+    %%io:format("not connected, rejected ~n"),
     {reply, reject, State#phone_state{status = disconnected}};
 handle_call({respond,busy}, _From, State=#phone_state{}) ->
+    %%io:format("not connected, bs is busy ~n"),
     {reply, busy, State#phone_state{status = disconnected}};
 
 handle_call({location,BSName}, _From, State=#phone_state{}) ->
@@ -77,10 +76,10 @@ handle_call(connect, _From, State = #phone_state{}) ->
         undefined -> {reply, {error, undefined_bs_name}, State};
         BSName -> case erlang:whereis(BSName) of
                       undefined ->
-                          io:format("~p: BS is not started ~n", [BSName]),
+                          %%io:format("~p: BS is not started ~n", [BSName]),
                           {reply, {error, bs_is_not_started, BSName}, State};
                       _Pid ->
-                          io:format("~p: Connecting ~n", [BSName]),
+                          %%io:format("~p: Connecting ~n", [BSName]),
                           bs:connect(BSName, State#phone_state.ms_pid, State#phone_state.ms_name),
                           {reply, ok, State}
                   end
@@ -111,8 +110,3 @@ terminate(_Reason, _State) ->
     ok.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
